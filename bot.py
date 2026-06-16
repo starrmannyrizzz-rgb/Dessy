@@ -11,7 +11,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ============ BOT CONFIGURATION ============
-BOT_TOKEN = "8101206245:AAENv9gxlh_T2RnXoZuA9Ljztss2OY5vvVY"
+BOT_TOKEN = "8101206245:AAElTLDkAPVE5gFaQwqxWwe2jcu1NN8v2AE"
 OWNER_ID = 6162078955
 # ===========================================
 
@@ -728,7 +728,7 @@ async def cb_stop(callback: types.CallbackQuery):
         reply_markup=make_start_kb(uid)
     )
 
-# ============ MAIN CREATION FUNCTION ============
+# ============ MAIN CREATION FUNCTION - FIXED ============
 async def _start_creation(uid, count, data, chat_id, is_continuation=False):
     stop_flags[uid] = False
 
@@ -760,7 +760,8 @@ async def _start_creation(uid, count, data, chat_id, is_continuation=False):
     stopped = False
 
     async def _worker():
-        nonlocal success, stopped        while True:
+        nonlocal success, stopped
+        while True:
             if stopped or stop_flags.get(uid):
                 return
             if success >= count:
@@ -799,7 +800,7 @@ async def _start_creation(uid, count, data, chat_id, is_continuation=False):
                         user_credits[uid] = max(0, user_credits.get(uid, 0) - 1)
                     credits_left = "" if uid == OWNER_ID else f"\n💳 Credits left: *{user_credits.get(uid, 0)}*"
                     
-                    # OTP display
+                    # FIXED OTP DISPLAY
                     otp_code_value = result.get("otp_code")
                     if otp_code_value and str(otp_code_value) not in ["None", "N/A", ""]:
                         otp_line = f"\n🔢 *OTP:* `{otp_code_value}`"
