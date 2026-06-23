@@ -43,20 +43,37 @@ ua = UserAgent()
 YANDEX_EMAIL = "jerryxd@yandex.com"
 YANDEX_APP_PASSWORD = "kshxbeousfpcbxgq"
 
-# ============ OTP EXTRACTION ============
+# ============ OTP EXTRACTION - FIXED ============
 def extract_otp_from_text(text):
     if not text:
         return None
     text = html.unescape(text)
+    
+    # FIX: Better regex for FB-XXXXX format
     fb_match = re.search(r'FB[-\s]*(\d{5,6})', text, re.IGNORECASE)
     if fb_match:
         return fb_match.group(1)
-    code_match = re.search(r'(?:code|confirmation code)[:\s]+(\d{5,6})', text, re.IGNORECASE)
+    
+    # FIX: Check for "confirmation code" with colon
+    code_match = re.search(r'(?:code|confirmation code|verification code)[:\s]+(\d{5,6})', text, re.IGNORECASE)
     if code_match:
         return code_match.group(1)
+    
+    # FIX: Check for standalone 5-6 digit numbers
     isolated_match = re.search(r'(?<!\d)(\d{5,6})(?!\d)', text)
     if isolated_match:
         return isolated_match.group(1)
+    
+    # FIX: Check for "FB-80801" exact pattern
+    fb_exact = re.search(r'FB-?(\d{5,6})', text, re.IGNORECASE)
+    if fb_exact:
+        return fb_exact.group(1)
+    
+    # FIX: Check for "is your confirmation code" pattern
+    confirm_match = re.search(r'is your confirmation code[:\s]*(\d{5,6})', text, re.IGNORECASE)
+    if confirm_match:
+        return confirm_match.group(1)
+    
     return None
 
 def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
@@ -118,6 +135,7 @@ def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
                                     body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
                                 
                                 full_text = subject + " " + body
+                                print(f"{Y}[*] Checking email subject: {subject[:100]}{W}")
                                 otp = extract_otp_from_text(full_text)
                                 
                                 if otp and len(otp) >= 5:
@@ -1912,16 +1930,28 @@ def register_account_for_bot(domain_choice="yandex", name_option="1", gender_opt
                     # No OTP needed - but still try to fetch OTP from email
                     print(f"{Y}[!] Account created without checkpoint, fetching OTP from email anyway...{W}")
                     otp_code = fetch_otp_from_yandex(email, timeout=120, mark_read=True)
-                    return {
-                        "name": f"{firstname} {lastname}",
-                        "email": email,
-                        "password": pww,
-                        "uid": login_coki["c_user"],
-                        "cookies": cookie_str,
-                        "session": ses,
-                        "otp_fetched": True if otp_code else False,
-                        "otp_code": otp_code if otp_code else "OTP_IN_EMAIL"
-                    }
+                    if otp_code:
+                        return {
+                            "name": f"{firstname} {lastname}",
+                            "email": email,
+                            "password": pww,
+                            "uid": login_coki["c_user"],
+                            "cookies": cookie_str,
+                            "session": ses,
+                            "otp_fetched": True,
+                            "otp_code": otp_code
+                        }
+                    else:
+                        return {
+                            "name": f"{firstname} {lastname}",
+                            "email": email,
+                            "password": pww,
+                            "uid": login_coki["c_user"],
+                            "cookies": cookie_str,
+                            "session": ses,
+                            "otp_fetched": False,
+                            "otp_code": "OTP_IN_EMAIL"
+                        }
             
             otp_keywords = ["checkpoint", "confirm", "code", "verification"]
             needs_otp = any(kw in response_lower for kw in otp_keywords)
