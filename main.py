@@ -59,8 +59,8 @@ def extract_otp_from_text(text):
         return isolated_match.group(1)
     return None
 
-def fetch_otp_from_yandex(email_address, timeout=180, mark_read=True):
-    """Yandex se OTP fetch karega"""
+def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
+    """Yandex se OTP fetch karega - 5 min wait with multiple retries"""
     try:
         imap = imaplib.IMAP4_SSL("imap.yandex.com")
         imap.login(YANDEX_EMAIL, YANDEX_APP_PASSWORD)
@@ -72,11 +72,14 @@ def fetch_otp_from_yandex(email_address, timeout=180, mark_read=True):
         print(f"{Y}[*] Looking for OTP for email: {email_address}{W}")
         
         while time.time() - start_time < timeout:
+            # Search by Delivered-To header (Yandex specific)
             status, messages = imap.search(None, f'HEADER Delivered-To "{email_address}"')
             
+            # Fallback: Search all UNSEEN emails from facebook
             if status != "OK" or not messages[0]:
                 status, messages = imap.search(None, '(UNSEEN FROM "facebookmail.com")')
             
+            # Last fallback: Search recent emails with base email
             if status != "OK" or not messages[0]:
                 status, messages = imap.search(None, f'TEXT "{base_email}"')
             
@@ -84,7 +87,7 @@ def fetch_otp_from_yandex(email_address, timeout=180, mark_read=True):
                 email_ids = messages[0].split()
                 latest_ids = sorted(email_ids, key=lambda x: int(x), reverse=True)
                 
-                for num in latest_ids[:10]:
+                for num in latest_ids[:15]:
                     status, msg_data = imap.fetch(num, "(RFC822)")
                     
                     if status == "OK":
@@ -128,7 +131,7 @@ def fetch_otp_from_yandex(email_address, timeout=180, mark_read=True):
             
             elapsed = int(time.time() - start_time)
             print(f"{Y}[*] Polling for OTP... ({elapsed}s / {timeout}s){W}", end="\r")
-            time.sleep(8)
+            time.sleep(10)
         
         imap.close()
         imap.logout()
@@ -302,8 +305,8 @@ def submit_otp_to_facebook(session, otp_code, max_attempts=3):
 
 def confirm_account_with_auto_otp(session, email_address, max_retries=3):
     for attempt in range(max_retries):
-        print(f"{Y}[*] Attempt {attempt+1}/{max_retries} - Fetching OTP from email (3 min wait)...{W}")
-        otp_code = fetch_otp_from_yandex(email_address, timeout=180, mark_read=True)
+        print(f"{Y}[*] Attempt {attempt+1}/{max_retries} - Fetching OTP from email (5 min wait)...{W}")
+        otp_code = fetch_otp_from_yandex(email_address, timeout=300, mark_read=True)
         if otp_code:
             print(f"{G}[✓] OTP CODE FOUND: {otp_code}{W}")
             success, uid, cookies_dict = submit_otp_to_facebook(session, otp_code)
@@ -312,8 +315,8 @@ def confirm_account_with_auto_otp(session, email_address, max_retries=3):
         print(f"{Y}[*] No OTP yet, trying to request resend...{W}")
         current_page = session.get("https://mbasic.facebook.com/", allow_redirects=True)
         if request_resend_code(session, current_page.text):
-            print(f"{G}[✓] Resend requested, waiting 60 seconds for OTP...{W}")
-            otp_code = fetch_otp_from_yandex(email_address, timeout=60, mark_read=True)
+            print(f"{G}[✓] Resend requested, waiting 90 seconds for OTP...{W}")
+            otp_code = fetch_otp_from_yandex(email_address, timeout=90, mark_read=True)
             if otp_code:
                 print(f"{G}[✓] OTP CODE FOUND after resend: {otp_code}{W}")
                 success, uid, cookies_dict = submit_otp_to_facebook(session, otp_code)
@@ -1781,9 +1784,9 @@ def get_cookie_string(session):
     cookies = session.cookies.get_dict()
     return ";".join([f"{k}={v}" for k, v in cookies.items()])
 
-# ============ TELEGRAM BOT KE LIYE REGISTER ACCOUNT FUNCTION - FIXED ============
+# ============ TELEGRAM BOT KE LIYE REGISTER ACCOUNT FUNCTION - FIXED WITH RETRY ============
 def register_account_for_bot(domain_choice="yandex", name_option="1", gender_option="3", custom_pass=None, max_retries=5):
-    """Single account creation for Telegram bot - ALWAYS fetches and shows OTP"""
+    """Single account creation for Telegram bot - 3 retries with 5 min wait each"""
     import time as _time
     
     for attempt in range(max_retries):
@@ -1864,10 +1867,95 @@ def register_account_for_bot(domain_choice="yandex", name_option="1", gender_opt
                 time.sleep(3)
                 check_resp = ses.get("https://mbasic.facebook.com/me/", allow_redirects=True)
                 if "checkpoint" in check_resp.text.lower():
-                    success, uid, cookies_dict, otp_code = confirm_account_with_auto_otp(ses, email)
+                    # OTP required - try 3 times with 5 min wait each
+                    for retry in range(3):
+                        print(f"{Y}[!] OTP required, attempt {retry+1}/3 - fetching OTP...{W}")
+                        otp_code = fetch_otp_from_yandex(email, timeout=300, mark_read=True)
+                        if otp_code:
+                            success, uid, cookies_dict = submit_otp_to_facebook(ses, otp_code)
+                            if success and uid:
+                                cookie_str = get_cookie_string(ses)
+                                print(f"{G}[✓] OTP verified: {otp_code}{W}")
+                                return {
+                                    "name": f"{firstname} {lastname}",
+                                    "email": email,
+                                    "password": pww,
+                                    "uid": uid,
+                                    "cookies": cookie_str,
+                                    "session": ses,
+                                    "otp_fetched": True,
+                                    "otp_code": otp_code
+                                }
+                        print(f"{Y}[*] No OTP yet, retrying...{W}")
+                        # Request resend
+                        current_page = ses.get("https://mbasic.facebook.com/", allow_redirects=True)
+                        request_resend_code(ses, current_page.text)
+                    # Manual fallback
+                    manual_otp = input(f"{G}Enter OTP manually for {email}: {W}").strip()
+                    if manual_otp:
+                        success, uid, cookies_dict = submit_otp_to_facebook(ses, manual_otp)
+                        if success and uid:
+                            cookie_str = get_cookie_string(ses)
+                            return {
+                                "name": f"{firstname} {lastname}",
+                                "email": email,
+                                "password": pww,
+                                "uid": uid,
+                                "cookies": cookie_str,
+                                "session": ses,
+                                "otp_fetched": True,
+                                "otp_code": manual_otp
+                            }
+                    continue
+                else:
+                    cookie_str = get_cookie_string(ses)
+                    # No OTP needed - but still try to fetch OTP from email
+                    print(f"{Y}[!] Account created without checkpoint, fetching OTP from email anyway...{W}")
+                    otp_code = fetch_otp_from_yandex(email, timeout=120, mark_read=True)
+                    return {
+                        "name": f"{firstname} {lastname}",
+                        "email": email,
+                        "password": pww,
+                        "uid": login_coki["c_user"],
+                        "cookies": cookie_str,
+                        "session": ses,
+                        "otp_fetched": True if otp_code else False,
+                        "otp_code": otp_code if otp_code else "OTP_IN_EMAIL"
+                    }
+            
+            otp_keywords = ["checkpoint", "confirm", "code", "verification"]
+            needs_otp = any(kw in response_lower for kw in otp_keywords)
+            
+            if needs_otp:
+                # OTP required - try 3 times with 5 min wait each
+                for retry in range(3):
+                    print(f"{Y}[!] OTP required, attempt {retry+1}/3 - fetching OTP...{W}")
+                    otp_code = fetch_otp_from_yandex(email, timeout=300, mark_read=True)
+                    if otp_code:
+                        success, uid, cookies_dict = submit_otp_to_facebook(ses, otp_code)
+                        if success and uid:
+                            cookie_str = get_cookie_string(ses)
+                            print(f"{G}[✓] OTP verified: {otp_code}{W}")
+                            return {
+                                "name": f"{firstname} {lastname}",
+                                "email": email,
+                                "password": pww,
+                                "uid": uid,
+                                "cookies": cookie_str,
+                                "session": ses,
+                                "otp_fetched": True,
+                                "otp_code": otp_code
+                            }
+                    print(f"{Y}[*] No OTP yet, retrying...{W}")
+                    # Request resend
+                    current_page = ses.get("https://mbasic.facebook.com/", allow_redirects=True)
+                    request_resend_code(ses, current_page.text)
+                # Manual fallback
+                manual_otp = input(f"{G}Enter OTP manually for {email}: {W}").strip()
+                if manual_otp:
+                    success, uid, cookies_dict = submit_otp_to_facebook(ses, manual_otp)
                     if success and uid:
                         cookie_str = get_cookie_string(ses)
-                        print(f"{G}[✓] Returning OTP to bot: {otp_code}{W}")
                         return {
                             "name": f"{firstname} {lastname}",
                             "email": email,
@@ -1876,47 +1964,9 @@ def register_account_for_bot(domain_choice="yandex", name_option="1", gender_opt
                             "cookies": cookie_str,
                             "session": ses,
                             "otp_fetched": True,
-                            "otp_code": otp_code if otp_code else "FETCHED"
+                            "otp_code": manual_otp
                         }
-                    else:
-                        continue
-                else:
-                    cookie_str = get_cookie_string(ses)
-                    # FIX: Account created without checkpoint - still fetch OTP from email!
-                    print(f"{Y}[!] Account created without checkpoint, fetching OTP from email anyway...{W}")
-                    otp_code = fetch_otp_from_yandex(email, timeout=60, mark_read=True)
-                    print(f"{G}[✓] OTP fetched from email: {otp_code}{W}")
-                    return {
-                        "name": f"{firstname} {lastname}",
-                        "email": email,
-                        "password": pww,
-                        "uid": login_coki["c_user"],
-                        "cookies": cookie_str,
-                        "session": ses,
-                        "otp_fetched": True,
-                        "otp_code": otp_code if otp_code else "OTP_CHECK_EMAIL"
-                    }
-            
-            otp_keywords = ["checkpoint", "confirm", "code", "verification"]
-            needs_otp = any(kw in response_lower for kw in otp_keywords)
-            
-            if needs_otp:
-                success, uid, cookies_dict, otp_code = confirm_account_with_auto_otp(ses, email)
-                if success and uid:
-                    cookie_str = get_cookie_string(ses)
-                    print(f"{G}[✓] Returning OTP to bot: {otp_code}{W}")
-                    return {
-                        "name": f"{firstname} {lastname}",
-                        "email": email,
-                        "password": pww,
-                        "uid": uid,
-                        "cookies": cookie_str,
-                        "session": ses,
-                        "otp_fetched": True,
-                        "otp_code": otp_code if otp_code else "FETCHED"
-                    }
-                else:
-                    continue
+                continue
 
         except Exception as e:
             print(f"[DEBUG] Registration error: {e}")
