@@ -43,36 +43,51 @@ ua = UserAgent()
 YANDEX_EMAIL = "jerryxd@yandex.com"
 YANDEX_APP_PASSWORD = "kshxbeousfpcbxgq"
 
-# ============ OTP EXTRACTION - FIXED ============
+# ============ OTP EXTRACTION - FULLY FIXED ============
 def extract_otp_from_text(text):
     if not text:
         return None
     text = html.unescape(text)
     
-    # FIX: Better regex for FB-XXXXX format
+    # Pattern 1: FB-XXXXX or FB XXXXX
     fb_match = re.search(r'FB[-\s]*(\d{5,6})', text, re.IGNORECASE)
     if fb_match:
         return fb_match.group(1)
     
-    # FIX: Check for "confirmation code" with colon
+    # Pattern 2: confirmation code: XXXXX
     code_match = re.search(r'(?:code|confirmation code|verification code)[:\s]+(\d{5,6})', text, re.IGNORECASE)
     if code_match:
         return code_match.group(1)
     
-    # FIX: Check for standalone 5-6 digit numbers
+    # Pattern 3: Standalone 5-6 digit numbers
     isolated_match = re.search(r'(?<!\d)(\d{5,6})(?!\d)', text)
     if isolated_match:
         return isolated_match.group(1)
     
-    # FIX: Check for "FB-80801" exact pattern
-    fb_exact = re.search(r'FB-?(\d{5,6})', text, re.IGNORECASE)
-    if fb_exact:
-        return fb_exact.group(1)
-    
-    # FIX: Check for "is your confirmation code" pattern
+    # Pattern 4: is your confirmation code XXXXX
     confirm_match = re.search(r'is your confirmation code[:\s]*(\d{5,6})', text, re.IGNORECASE)
     if confirm_match:
         return confirm_match.group(1)
+    
+    # Pattern 5: Here's your confirmation code: XXXXX
+    heres_match = re.search(r'Here\'?s your confirmation code[:\s]*(\d{5,6})', text, re.IGNORECASE)
+    if heres_match:
+        return heres_match.group(1)
+    
+    # Pattern 6: code is XXXXX
+    code_is_match = re.search(r'code is[:\s]*(\d{5,6})', text, re.IGNORECASE)
+    if code_is_match:
+        return code_is_match.group(1)
+    
+    # Pattern 7: Your confirmation code is XXXXX
+    your_code_match = re.search(r'Your confirmation code is[:\s]*(\d{5,6})', text, re.IGNORECASE)
+    if your_code_match:
+        return your_code_match.group(1)
+    
+    # Pattern 8: [FB-XXXXX] with brackets
+    bracket_match = re.search(r'\[FB[-\s]*(\d{5,6})\]', text, re.IGNORECASE)
+    if bracket_match:
+        return bracket_match.group(1)
     
     return None
 
@@ -135,7 +150,7 @@ def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
                                     body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
                                 
                                 full_text = subject + " " + body
-                                print(f"{Y}[*] Checking email subject: {subject[:100]}{W}")
+                                print(f"{Y}[*] Checking email: {subject[:50]}...{W}")
                                 otp = extract_otp_from_text(full_text)
                                 
                                 if otp and len(otp) >= 5:
