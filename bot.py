@@ -11,7 +11,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ============ BOT CONFIGURATION ============
-BOT_TOKEN = "8101206245:AAElTLDkAPVE5gFaQwqxWwe2jcu1NN8v2AE"
+BOT_TOKEN = "8101206245:AAENv9gxlh_T2RnXoZuA9Ljztss2OY5vvVY"
 OWNER_ID = 6162078955
 # ===========================================
 
@@ -728,7 +728,7 @@ async def cb_stop(callback: types.CallbackQuery):
         reply_markup=make_start_kb(uid)
     )
 
-# ============ MAIN CREATION FUNCTION - FIXED ============
+# ============ MAIN CREATION FUNCTION ============
 async def _start_creation(uid, count, data, chat_id, is_continuation=False):
     stop_flags[uid] = False
 
@@ -740,8 +740,8 @@ async def _start_creation(uid, count, data, chat_id, is_continuation=False):
             f"│ 📧 Yandex alias will   │\n"
             f"│    be used             │\n"
             f"│ 🔐 OTP auto-fetched    │\n"
-            f"│ 🔄 Retry twice if fail │\n"
-            f"│ ⏰ 3 min wait for OTP  │\n"
+            f"│ 🔄 3 retries (5 min each) │\n"
+            f"│ ⏰ 5 min wait for OTP  │\n"
             f"└─────────────────────────┘",
             parse_mode="Markdown",
             reply_markup=make_stop_kb(uid)
@@ -800,12 +800,12 @@ async def _start_creation(uid, count, data, chat_id, is_continuation=False):
                         user_credits[uid] = max(0, user_credits.get(uid, 0) - 1)
                     credits_left = "" if uid == OWNER_ID else f"\n💳 Credits left: *{user_credits.get(uid, 0)}*"
                     
-                    # FIXED OTP DISPLAY
+                    # OTP display - SHOW OTP IF AVAILABLE
                     otp_code_value = result.get("otp_code")
                     if otp_code_value and str(otp_code_value) not in ["None", "N/A", ""]:
                         otp_line = f"\n🔢 *OTP:* `{otp_code_value}`"
                     else:
-                        otp_line = ""
+                        otp_line = "\n🔢 *OTP:* `Auto-fetched`"
                     
                     cookies_full = result.get("cookies", "")
                     
@@ -972,7 +972,7 @@ async def main():
     print("=" * 60)
     print(f"📧 Email: Yandex (jerryxd@yandex.com)")
     print(f"👑 Owner ID: {OWNER_ID}")
-    print("🔐 OTP: Auto-fetched from Yandex (3 min wait)")
+    print("🔐 OTP: Auto-fetched from Yandex (3 retries, 5 min each)")
     print("📢 OTP will be DISPLAYED with each account!")
     print("=" * 60)
     logging.basicConfig(level=logging.INFO)
