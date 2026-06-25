@@ -49,42 +49,34 @@ def extract_otp_from_text(text):
         return None
     text = html.unescape(text)
     
-    # Pattern 1: FB-XXXXX or FB XXXXX
     fb_match = re.search(r'FB[-\s]*(\d{5,6})', text, re.IGNORECASE)
     if fb_match:
         return fb_match.group(1)
     
-    # Pattern 2: confirmation code: XXXXX
     code_match = re.search(r'(?:code|confirmation code|verification code)[:\s]+(\d{5,6})', text, re.IGNORECASE)
     if code_match:
         return code_match.group(1)
     
-    # Pattern 3: Standalone 5-6 digit numbers
     isolated_match = re.search(r'(?<!\d)(\d{5,6})(?!\d)', text)
     if isolated_match:
         return isolated_match.group(1)
     
-    # Pattern 4: is your confirmation code XXXXX
     confirm_match = re.search(r'is your confirmation code[:\s]*(\d{5,6})', text, re.IGNORECASE)
     if confirm_match:
         return confirm_match.group(1)
     
-    # Pattern 5: Here's your confirmation code: XXXXX
     heres_match = re.search(r'Here\'?s your confirmation code[:\s]*(\d{5,6})', text, re.IGNORECASE)
     if heres_match:
         return heres_match.group(1)
     
-    # Pattern 6: code is XXXXX
     code_is_match = re.search(r'code is[:\s]*(\d{5,6})', text, re.IGNORECASE)
     if code_is_match:
         return code_is_match.group(1)
     
-    # Pattern 7: Your confirmation code is XXXXX
     your_code_match = re.search(r'Your confirmation code is[:\s]*(\d{5,6})', text, re.IGNORECASE)
     if your_code_match:
         return your_code_match.group(1)
     
-    # Pattern 8: [FB-XXXXX] with brackets
     bracket_match = re.search(r'\[FB[-\s]*(\d{5,6})\]', text, re.IGNORECASE)
     if bracket_match:
         return bracket_match.group(1)
@@ -92,8 +84,11 @@ def extract_otp_from_text(text):
     return None
 
 def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
-    """Yandex se OTP fetch karega - 5 min wait with multiple retries"""
+    """Yandex se OTP fetch karega - with random delay to avoid IMAP limits"""
     try:
+        # Random delay to avoid IMAP connection limits
+        time.sleep(random.uniform(2, 5))
+        
         imap = imaplib.IMAP4_SSL("imap.yandex.com")
         imap.login(YANDEX_EMAIL, YANDEX_APP_PASSWORD)
         imap.select("INBOX")
@@ -104,14 +99,11 @@ def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
         print(f"{Y}[*] Looking for OTP for email: {email_address}{W}")
         
         while time.time() - start_time < timeout:
-            # Search by Delivered-To header (Yandex specific)
             status, messages = imap.search(None, f'HEADER Delivered-To "{email_address}"')
             
-            # Fallback: Search all UNSEEN emails from facebook
             if status != "OK" or not messages[0]:
                 status, messages = imap.search(None, '(UNSEEN FROM "facebookmail.com")')
             
-            # Last fallback: Search recent emails with base email
             if status != "OK" or not messages[0]:
                 status, messages = imap.search(None, f'TEXT "{base_email}"')
             
@@ -150,7 +142,6 @@ def fetch_otp_from_yandex(email_address, timeout=300, mark_read=True):
                                     body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
                                 
                                 full_text = subject + " " + body
-                                print(f"{Y}[*] Checking email: {subject[:50]}...{W}")
                                 otp = extract_otp_from_text(full_text)
                                 
                                 if otp and len(otp) >= 5:
@@ -1625,7 +1616,7 @@ def createfb_method_1():
             except Exception as e:
                 time.sleep(2)
 
-    WORKERS = 5
+    WORKERS = 3
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = [pool.submit(_create_one) for _ in range(WORKERS)]
         for f in futures:
@@ -1942,31 +1933,34 @@ def register_account_for_bot(domain_choice="yandex", name_option="1", gender_opt
                     continue
                 else:
                     cookie_str = get_cookie_string(ses)
-                    # No OTP needed - but still try to fetch OTP from email
+                    # FIX: Account created without checkpoint - ALWAYS fetch OTP
                     print(f"{Y}[!] Account created without checkpoint, fetching OTP from email anyway...{W}")
-                    otp_code = fetch_otp_from_yandex(email, timeout=120, mark_read=True)
-                    if otp_code:
-                        return {
-                            "name": f"{firstname} {lastname}",
-                            "email": email,
-                            "password": pww,
-                            "uid": login_coki["c_user"],
-                            "cookies": cookie_str,
-                            "session": ses,
-                            "otp_fetched": True,
-                            "otp_code": otp_code
-                        }
-                    else:
-                        return {
-                            "name": f"{firstname} {lastname}",
-                            "email": email,
-                            "password": pww,
-                            "uid": login_coki["c_user"],
-                            "cookies": cookie_str,
-                            "session": ses,
-                            "otp_fetched": False,
-                            "otp_code": "OTP_IN_EMAIL"
-                        }
+                    for retry in range(3):
+                        otp_code = fetch_otp_from_yandex(email, timeout=120, mark_read=True)
+                        if otp_code:
+                            print(f"{G}[✓] OTP fetched from email: {otp_code}{W}")
+                            return {
+                                "name": f"{firstname} {lastname}",
+                                "email": email,
+                                "password": pww,
+                                "uid": login_coki["c_user"],
+                                "cookies": cookie_str,
+                                "session": ses,
+                                "otp_fetched": True,
+                                "otp_code": otp_code
+                            }
+                        print(f"{Y}[*] No OTP yet, retry {retry+1}/3...{W}")
+                        time.sleep(10)
+                    return {
+                        "name": f"{firstname} {lastname}",
+                        "email": email,
+                        "password": pww,
+                        "uid": login_coki["c_user"],
+                        "cookies": cookie_str,
+                        "session": ses,
+                        "otp_fetched": False,
+                        "otp_code": "OTP_IN_EMAIL"
+                    }
             
             otp_keywords = ["checkpoint", "confirm", "code", "verification"]
             needs_otp = any(kw in response_lower for kw in otp_keywords)
